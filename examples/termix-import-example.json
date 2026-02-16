@@ -1,0 +1,22 @@
+{
+  "hosts": [
+    {
+      "ip": "192.168.1.100",
+      "port": 22,
+      "username": "your-user",
+      "authType": "key",
+      "key": "-----BEGIN RSA PRIVATE KEY-----\n<YOUR_PRIVATE_KEY_HERE>\n-----END RSA PRIVATE KEY-----",
+      "keyType": "ssh-rsa",
+      "name": "example-server"
+    },
+    {
+      "ip": "192.168.1.101",
+      "port": 22,
+      "username": "your-user",
+      "authType": "key",
+      "key": "-----BEGIN RSA PRIVATE KEY-----\n<YOUR_PRIVATE_KEY_HERE>\n-----END RSA PRIVATE KEY-----",
+      "keyType": "ssh-rsa",
+      "name": "example-mac"
+    }
+  ]
+}
