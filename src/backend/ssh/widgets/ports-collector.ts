@@ -121,13 +121,20 @@ function parseLsofOutput(output: string): ListeningPort[] {
     const trimmed = line.trim();
     if (!trimmed) continue;
 
-    // lsof output: COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
+    // lsof output: COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME (STATE)
     const parts = trimmed.split(/\s+/);
-    if (parts.length < 10) continue;
+    if (parts.length < 9) continue;
+
+    // Check for "(LISTEN)" in the line
+    if (!trimmed.includes("LISTEN")) continue;
 
     const command = parts[0];
     const pid = parseInt(parts[1], 10);
-    const name = parts[parts.length - 1]; // e.g. "*:8080" or "127.0.0.1:3000"
+
+    // NAME field is second-to-last when (LISTEN) is present
+    // e.g. "*:8080 (LISTEN)" or "127.0.0.1:3000 (LISTEN)"
+    const nameIdx = parts.findIndex((p) => p.includes(":") && !p.startsWith("0x") && !p.startsWith("0t"));
+    const name = nameIdx >= 0 ? parts[nameIdx] : parts[parts.length - 2];
 
     if (!name || !name.includes(":")) continue;
 
@@ -137,9 +144,6 @@ function parseLsofOutput(output: string): ListeningPort[] {
     const port = parseInt(portStr, 10);
 
     if (isNaN(port)) continue;
-
-    // Check for "(LISTEN)" in the line
-    if (!trimmed.includes("LISTEN")) continue;
 
     const portEntry: ListeningPort = {
       protocol: "tcp",
