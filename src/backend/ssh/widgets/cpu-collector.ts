@@ -97,7 +97,7 @@ async function collectCpuDarwin(client: Client): Promise<{
     Promise.all([
       execCommand(
         client,
-        "top -l 2 -n 0 -s 1 | grep -A1 'CPU usage' | tail -1",
+        "top -l 2 -n 0 -s 1 | grep 'CPU usage' | tail -1",
         15000,
       ),
       execCommand(client, "sysctl -n vm.loadavg"),

@@ -1,5 +1,5 @@
 import type { Client } from "ssh2";
-import { execCommand, toFixedNum } from "./common-utils.js";
+import { execCommand, toFixedNum, detectOS } from "./common-utils.js";
 
 export async function collectDiskMetrics(client: Client): Promise<{
   percent: number | null;
@@ -8,8 +8,15 @@ export async function collectDiskMetrics(client: Client): Promise<{
   availableHuman: string | null;
 }> {
   try {
+    const os = await detectOS(client);
+
+    // macOS: df -h -P together drops -h, so use df -h without -P
+    // Linux: df -h -P works correctly
+    const humanCmd =
+      os === "darwin" ? "df -h / | tail -n +2" : "df -h -P / | tail -n +2";
+
     const [diskOutHuman, diskOutKiB] = await Promise.all([
-      execCommand(client, "df -h -P / | tail -n +2"),
+      execCommand(client, humanCmd),
       execCommand(client, "df -k -P / | tail -n +2"),
     ]);
 
@@ -27,7 +34,10 @@ export async function collectDiskMetrics(client: Client): Promise<{
     const humanParts = humanLine.split(/\s+/);
     const kibParts = kibLine.split(/\s+/);
 
-    if (humanParts.length >= 6 && kibParts.length >= 6) {
+    // macOS df -h (no -P): Filesystem Size Used Avail Capacity iused ifree %iused Mounted
+    // Linux df -h -P:      Filesystem Size Used Avail Use% Mounted
+    // Both have Size/Used/Avail at indices 1/2/3
+    if (humanParts.length >= 5 && kibParts.length >= 5) {
       const totalHuman = humanParts[1] || null;
       const usedHuman = humanParts[2] || null;
       const availableHuman = humanParts[3] || null;
