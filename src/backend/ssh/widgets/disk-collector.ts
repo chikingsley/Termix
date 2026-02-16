@@ -7,15 +7,10 @@ export async function collectDiskMetrics(client: Client): Promise<{
   totalHuman: string | null;
   availableHuman: string | null;
 }> {
-  let diskPercent: number | null = null;
-  let usedHuman: string | null = null;
-  let totalHuman: string | null = null;
-  let availableHuman: string | null = null;
-
   try {
-    const [diskOutHuman, diskOutBytes] = await Promise.all([
+    const [diskOutHuman, diskOutKiB] = await Promise.all([
       execCommand(client, "df -h -P / | tail -n +2"),
-      execCommand(client, "df -B1 -P / | tail -n +2"),
+      execCommand(client, "df -k -P / | tail -n +2"),
     ]);
 
     const humanLine =
@@ -23,45 +18,45 @@ export async function collectDiskMetrics(client: Client): Promise<{
         .split("\n")
         .map((l) => l.trim())
         .filter(Boolean)[0] || "";
-    const bytesLine =
-      diskOutBytes.stdout
+    const kibLine =
+      diskOutKiB.stdout
         .split("\n")
         .map((l) => l.trim())
         .filter(Boolean)[0] || "";
 
     const humanParts = humanLine.split(/\s+/);
-    const bytesParts = bytesLine.split(/\s+/);
+    const kibParts = kibLine.split(/\s+/);
 
-    if (humanParts.length >= 6 && bytesParts.length >= 6) {
-      totalHuman = humanParts[1] || null;
-      usedHuman = humanParts[2] || null;
-      availableHuman = humanParts[3] || null;
+    if (humanParts.length >= 6 && kibParts.length >= 6) {
+      const totalHuman = humanParts[1] || null;
+      const usedHuman = humanParts[2] || null;
+      const availableHuman = humanParts[3] || null;
 
-      const totalBytes = Number(bytesParts[1]);
-      const usedBytes = Number(bytesParts[2]);
+      const totalKiB = Number(kibParts[1]);
+      const usedKiB = Number(kibParts[2]);
 
+      let diskPercent: number | null = null;
       if (
-        Number.isFinite(totalBytes) &&
-        Number.isFinite(usedBytes) &&
-        totalBytes > 0
+        Number.isFinite(totalKiB) &&
+        Number.isFinite(usedKiB) &&
+        totalKiB > 0
       ) {
-        diskPercent = Math.max(
-          0,
-          Math.min(100, (usedBytes / totalBytes) * 100),
-        );
+        diskPercent = Math.max(0, Math.min(100, (usedKiB / totalKiB) * 100));
       }
+
+      return {
+        percent: toFixedNum(diskPercent, 0),
+        usedHuman,
+        totalHuman,
+        availableHuman,
+      };
     }
-  } catch (e) {
-    diskPercent = null;
-    usedHuman = null;
-    totalHuman = null;
-    availableHuman = null;
-  }
+  } catch {}
 
   return {
-    percent: toFixedNum(diskPercent, 0),
-    usedHuman,
-    totalHuman,
-    availableHuman,
+    percent: null,
+    usedHuman: null,
+    totalHuman: null,
+    availableHuman: null,
   };
 }

@@ -1,5 +1,5 @@
 import type { Client } from "ssh2";
-import { execCommand } from "./common-utils.js";
+import { execCommand, detectOS } from "./common-utils.js";
 import type {
   PortsMetrics,
   ListeningPort,
@@ -113,10 +113,75 @@ function parseNetstatOutput(output: string): ListeningPort[] {
   return ports;
 }
 
+function parseLsofOutput(output: string): ListeningPort[] {
+  const ports: ListeningPort[] = [];
+  const lines = output.split("\n");
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    // lsof output: COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
+    const parts = trimmed.split(/\s+/);
+    if (parts.length < 10) continue;
+
+    const command = parts[0];
+    const pid = parseInt(parts[1], 10);
+    const name = parts[parts.length - 1]; // e.g. "*:8080" or "127.0.0.1:3000"
+
+    if (!name || !name.includes(":")) continue;
+
+    const lastColon = name.lastIndexOf(":");
+    const address = name.substring(0, lastColon);
+    const portStr = name.substring(lastColon + 1);
+    const port = parseInt(portStr, 10);
+
+    if (isNaN(port)) continue;
+
+    // Check for "(LISTEN)" in the line
+    if (!trimmed.includes("LISTEN")) continue;
+
+    const portEntry: ListeningPort = {
+      protocol: "tcp",
+      localAddress: address === "*" ? "0.0.0.0" : address,
+      localPort: port,
+      state: "LISTEN",
+    };
+
+    if (!isNaN(pid)) portEntry.pid = pid;
+    if (command) portEntry.process = command;
+
+    ports.push(portEntry);
+  }
+
+  return ports;
+}
+
 export async function collectPortsMetrics(
   client: Client,
 ): Promise<PortsMetrics> {
   try {
+    const os = await detectOS(client);
+
+    if (os === "darwin") {
+      const lsofResult = await execCommand(
+        client,
+        "lsof -iTCP -sTCP:LISTEN -nP 2>/dev/null",
+        15000,
+      );
+
+      if (lsofResult.stdout && lsofResult.stdout.includes("COMMAND")) {
+        const ports = parseLsofOutput(lsofResult.stdout);
+        return {
+          source: "lsof",
+          ports: ports.sort((a, b) => a.localPort - b.localPort),
+        };
+      }
+
+      return { source: "none", ports: [] };
+    }
+
+    // Linux: try ss first, then netstat
     const ssResult = await execCommand(client, "ss -tulnp 2>/dev/null", 15000);
 
     if (ssResult.stdout && ssResult.stdout.includes("Local")) {
@@ -141,14 +206,8 @@ export async function collectPortsMetrics(
       };
     }
 
-    return {
-      source: "none",
-      ports: [],
-    };
+    return { source: "none", ports: [] };
   } catch {
-    return {
-      source: "none",
-      ports: [],
-    };
+    return { source: "none", ports: [] };
   }
 }

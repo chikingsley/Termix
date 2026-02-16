@@ -1,6 +1,5 @@
 import type { Client } from "ssh2";
-import { execCommand } from "./common-utils.js";
-import { statsLogger } from "../../utils/logger.js";
+import { execCommand, detectOS } from "./common-utils.js";
 
 export async function collectProcessesMetrics(client: Client): Promise<{
   total: number | null;
@@ -24,7 +23,15 @@ export async function collectProcessesMetrics(client: Client): Promise<{
   }> = [];
 
   try {
-    const psOut = await execCommand(client, "ps aux --sort=-%cpu | head -n 11");
+    const os = await detectOS(client);
+
+    // macOS BSD ps doesn't support --sort, use -r (sort by CPU descending)
+    const psCmd =
+      os === "darwin"
+        ? "ps aux -r | head -n 11"
+        : "ps aux --sort=-%cpu | head -n 11";
+
+    const psOut = await execCommand(client, psCmd);
     const psLines = psOut.stdout
       .split("\n")
       .map((l) => l.trim())
@@ -46,15 +53,17 @@ export async function collectProcessesMetrics(client: Client): Promise<{
       }
     }
 
-    const procCount = await execCommand(client, "ps aux | wc -l");
-    const runningCount = await execCommand(client, "ps aux | grep -c ' R '");
+    const [procCountOut, runningCountOut] = await Promise.all([
+      execCommand(client, "ps aux | wc -l"),
+      execCommand(client, "ps aux | grep -c ' R '"),
+    ]);
 
-    const totalCount = Number(procCount.stdout.trim()) - 1;
+    const totalCount = Number(procCountOut.stdout.trim()) - 1;
     totalProcesses = Number.isFinite(totalCount) ? totalCount : null;
 
-    const runningCount2 = Number(runningCount.stdout.trim());
-    runningProcesses = Number.isFinite(runningCount2) ? runningCount2 : null;
-  } catch (e) {}
+    const runningCount = Number(runningCountOut.stdout.trim());
+    runningProcesses = Number.isFinite(runningCount) ? runningCount : null;
+  } catch {}
 
   return {
     total: totalProcesses,

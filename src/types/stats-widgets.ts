@@ -20,7 +20,7 @@ export interface ListeningPort {
 }
 
 export interface PortsMetrics {
-  source: "ss" | "netstat" | "none";
+  source: "ss" | "netstat" | "lsof" | "none";
   ports: ListeningPort[];
 }
 
@@ -44,7 +44,7 @@ export interface FirewallChain {
 }
 
 export interface FirewallMetrics {
-  type: "iptables" | "nftables" | "none";
+  type: "iptables" | "nftables" | "pf" | "none";
   status: "active" | "inactive" | "unknown";
   chains: FirewallChain[];
 }

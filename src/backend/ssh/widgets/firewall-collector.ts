@@ -1,5 +1,5 @@
 import type { Client } from "ssh2";
-import { execCommand } from "./common-utils.js";
+import { execCommand, detectOS } from "./common-utils.js";
 import type {
   FirewallMetrics,
   FirewallChain,
@@ -18,49 +18,31 @@ function parseIptablesRule(line: string): FirewallRule | null {
   };
 
   const chainMatch = line.match(/^-A\s+(\S+)/);
-  if (chainMatch) {
-    rule.chain = chainMatch[1];
-  }
+  if (chainMatch) rule.chain = chainMatch[1];
 
   const targetMatch = line.match(/-j\s+(\S+)/);
-  if (targetMatch) {
-    rule.target = targetMatch[1];
-  }
+  if (targetMatch) rule.target = targetMatch[1];
 
   const protocolMatch = line.match(/-p\s+(\S+)/);
-  if (protocolMatch) {
-    rule.protocol = protocolMatch[1];
-  }
+  if (protocolMatch) rule.protocol = protocolMatch[1];
 
   const sourceMatch = line.match(/-s\s+(\S+)/);
-  if (sourceMatch) {
-    rule.source = sourceMatch[1];
-  }
+  if (sourceMatch) rule.source = sourceMatch[1];
 
   const destMatch = line.match(/-d\s+(\S+)/);
-  if (destMatch) {
-    rule.destination = destMatch[1];
-  }
+  if (destMatch) rule.destination = destMatch[1];
 
   const dportMatch = line.match(/--dport\s+(\S+)/);
-  if (dportMatch) {
-    rule.dport = dportMatch[1];
-  }
+  if (dportMatch) rule.dport = dportMatch[1];
 
   const sportMatch = line.match(/--sport\s+(\S+)/);
-  if (sportMatch) {
-    rule.sport = sportMatch[1];
-  }
+  if (sportMatch) rule.sport = sportMatch[1];
 
   const stateMatch = line.match(/--state\s+(\S+)/);
-  if (stateMatch) {
-    rule.state = stateMatch[1];
-  }
+  if (stateMatch) rule.state = stateMatch[1];
 
   const interfaceMatch = line.match(/-i\s+(\S+)/);
-  if (interfaceMatch) {
-    rule.interface = interfaceMatch[1];
-  }
+  if (interfaceMatch) rule.interface = interfaceMatch[1];
 
   return rule;
 }
@@ -114,9 +96,7 @@ function parseNftablesOutput(output: string): FirewallChain[] {
       /chain\s+(\S+)\s*\{?\s*(?:type\s+\S+\s+hook\s+(\S+))?/,
     );
     if (chainMatch) {
-      if (currentChain) {
-        chains.push(currentChain);
-      }
+      if (currentChain) chains.push(currentChain);
       currentChain = {
         name: chainMatch[1].toUpperCase(),
         policy: "ACCEPT",
@@ -127,9 +107,7 @@ function parseNftablesOutput(output: string): FirewallChain[] {
 
     if (currentChain && trimmed.startsWith("policy ")) {
       const policyMatch = trimmed.match(/policy\s+(\S+)/);
-      if (policyMatch) {
-        currentChain.policy = policyMatch[1].toUpperCase();
-      }
+      if (policyMatch) currentChain.policy = policyMatch[1].toUpperCase();
       continue;
     }
 
@@ -159,28 +137,18 @@ function parseNftablesOutput(output: string): FirewallChain[] {
       }
 
       const saddrMatch = trimmed.match(/saddr\s+(\S+)/);
-      if (saddrMatch) {
-        rule.source = saddrMatch[1];
-      }
+      if (saddrMatch) rule.source = saddrMatch[1];
 
       const daddrMatch = trimmed.match(/daddr\s+(\S+)/);
-      if (daddrMatch) {
-        rule.destination = daddrMatch[1];
-      }
+      if (daddrMatch) rule.destination = daddrMatch[1];
 
       const iifMatch = trimmed.match(/iif\s+"?(\S+)"?/);
-      if (iifMatch) {
-        rule.interface = iifMatch[1].replace(/"/g, "");
-      }
+      if (iifMatch) rule.interface = iifMatch[1].replace(/"/g, "");
 
       const ctStateMatch = trimmed.match(/ct\s+state\s+(\S+)/);
-      if (ctStateMatch) {
-        rule.state = ctStateMatch[1].toUpperCase();
-      }
+      if (ctStateMatch) rule.state = ctStateMatch[1].toUpperCase();
 
-      if (rule.target) {
-        currentChain.rules.push(rule);
-      }
+      if (rule.target) currentChain.rules.push(rule);
     }
 
     if (trimmed === "}") {
@@ -191,17 +159,83 @@ function parseNftablesOutput(output: string): FirewallChain[] {
     }
   }
 
-  if (currentChain) {
-    chains.push(currentChain);
+  if (currentChain) chains.push(currentChain);
+  return chains;
+}
+
+function parsePfctlOutput(output: string): FirewallChain[] {
+  const rules: FirewallRule[] = [];
+  const lines = output.split("\n");
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    const rule: FirewallRule = {
+      chain: "FILTER",
+      target: "",
+      protocol: "all",
+      source: "0.0.0.0/0",
+      destination: "0.0.0.0/0",
+    };
+
+    // pf rules: "pass/block [in/out] [quick] [on <iface>] [proto <proto>] from <src> to <dst> [port <port>]"
+    if (trimmed.startsWith("pass")) rule.target = "ACCEPT";
+    else if (trimmed.startsWith("block")) rule.target = "DROP";
+    else continue;
+
+    const protoMatch = trimmed.match(/proto\s+(\S+)/);
+    if (protoMatch) rule.protocol = protoMatch[1];
+
+    const fromMatch = trimmed.match(/from\s+(\S+)/);
+    if (fromMatch && fromMatch[1] !== "any") rule.source = fromMatch[1];
+
+    const toMatch = trimmed.match(/to\s+(\S+)/);
+    if (toMatch && toMatch[1] !== "any") rule.destination = toMatch[1];
+
+    const portMatch = trimmed.match(/port\s+(\S+)/);
+    if (portMatch) rule.dport = portMatch[1];
+
+    const ifMatch = trimmed.match(/on\s+(\S+)/);
+    if (ifMatch) rule.interface = ifMatch[1];
+
+    rules.push(rule);
   }
 
-  return chains;
+  if (rules.length === 0) {
+    return [{ name: "FILTER", policy: "ACCEPT", rules: [] }];
+  }
+
+  return [{ name: "FILTER", policy: "ACCEPT", rules }];
 }
 
 export async function collectFirewallMetrics(
   client: Client,
 ): Promise<FirewallMetrics> {
   try {
+    const os = await detectOS(client);
+
+    if (os === "darwin") {
+      const pfResult = await execCommand(
+        client,
+        "pfctl -sr 2>/dev/null",
+        15000,
+      );
+
+      if (pfResult.stdout && pfResult.stdout.trim()) {
+        const chains = parsePfctlOutput(pfResult.stdout);
+        const hasRules = chains.some((c) => c.rules.length > 0);
+        return {
+          type: "pf",
+          status: hasRules ? "active" : "inactive",
+          chains,
+        };
+      }
+
+      return { type: "pf", status: "inactive", chains: [] };
+    }
+
+    // Linux: try iptables first, then nftables
     const iptablesResult = await execCommand(
       client,
       "iptables-save 2>/dev/null",
@@ -211,7 +245,6 @@ export async function collectFirewallMetrics(
     if (iptablesResult.stdout && iptablesResult.stdout.includes("*filter")) {
       const chains = parseIptablesOutput(iptablesResult.stdout);
       const hasRules = chains.some((c) => c.rules.length > 0);
-
       return {
         type: "iptables",
         status: hasRules ? "active" : "inactive",
@@ -231,7 +264,6 @@ export async function collectFirewallMetrics(
     if (nftResult.stdout && nftResult.stdout.trim()) {
       const chains = parseNftablesOutput(nftResult.stdout);
       const hasRules = chains.some((c) => c.rules.length > 0);
-
       return {
         type: "nftables",
         status: hasRules ? "active" : "inactive",
@@ -239,16 +271,8 @@ export async function collectFirewallMetrics(
       };
     }
 
-    return {
-      type: "none",
-      status: "unknown",
-      chains: [],
-    };
+    return { type: "none", status: "unknown", chains: [] };
   } catch {
-    return {
-      type: "none",
-      status: "unknown",
-      chains: [],
-    };
+    return { type: "none", status: "unknown", chains: [] };
   }
 }

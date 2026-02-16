@@ -88,6 +88,27 @@ export function execCommand(
   });
 }
 
+export type OSType = "linux" | "darwin" | "unknown";
+
+const osCache = new WeakMap<Client, OSType>();
+
+export async function detectOS(client: Client): Promise<OSType> {
+  const cached = osCache.get(client);
+  if (cached) return cached;
+
+  try {
+    const result = await execCommand(client, "uname -s", 5000);
+    const os = result.stdout.trim().toLowerCase();
+    let detected: OSType = "unknown";
+    if (os === "linux") detected = "linux";
+    else if (os === "darwin") detected = "darwin";
+    osCache.set(client, detected);
+    return detected;
+  } catch {
+    return "unknown";
+  }
+}
+
 export function toFixedNum(
   n: number | null | undefined,
   digits = 2,

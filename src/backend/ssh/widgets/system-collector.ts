@@ -1,34 +1,43 @@
 import type { Client } from "ssh2";
-import { execCommand } from "./common-utils.js";
-import { statsLogger } from "../../utils/logger.js";
+import { execCommand, detectOS } from "./common-utils.js";
 
 export async function collectSystemMetrics(client: Client): Promise<{
   hostname: string | null;
   kernel: string | null;
   os: string | null;
 }> {
-  let hostname: string | null = null;
-  let kernel: string | null = null;
-  let os: string | null = null;
-
   try {
-    const hostnameOut = await execCommand(client, "hostname");
-    const kernelOut = await execCommand(client, "uname -r");
-    const osOut = await execCommand(
-      client,
-      "cat /etc/os-release | grep '^PRETTY_NAME=' | cut -d'\"' -f2",
-    );
+    const osType = await detectOS(client);
 
-    hostname = hostnameOut.stdout.trim() || null;
-    kernel = kernelOut.stdout.trim() || null;
-    os = osOut.stdout.trim() || null;
-  } catch (e) {
-    // No error log
+    const osCmd =
+      osType === "darwin"
+        ? "sw_vers -productName && sw_vers -productVersion"
+        : "cat /etc/os-release | grep '^PRETTY_NAME=' | cut -d'\"' -f2";
+
+    const [hostnameOut, kernelOut, osOut] = await Promise.all([
+      execCommand(client, "hostname"),
+      execCommand(client, "uname -r"),
+      execCommand(client, osCmd),
+    ]);
+
+    let osStr: string | null = null;
+    if (osType === "darwin") {
+      // sw_vers outputs two lines: "macOS\n15.2" → "macOS 15.2"
+      const parts = osOut.stdout
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean);
+      osStr = parts.join(" ") || null;
+    } else {
+      osStr = osOut.stdout.trim() || null;
+    }
+
+    return {
+      hostname: hostnameOut.stdout.trim() || null,
+      kernel: kernelOut.stdout.trim() || null,
+      os: osStr,
+    };
+  } catch {
+    return { hostname: null, kernel: null, os: null };
   }
-
-  return {
-    hostname,
-    kernel,
-    os,
-  };
 }

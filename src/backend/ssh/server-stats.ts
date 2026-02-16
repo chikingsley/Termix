@@ -1864,7 +1864,7 @@ async function collectMetrics(host: SSHHostWithCredentials): Promise<{
         } catch (e) {}
 
         let ports: {
-          source: "ss" | "netstat" | "none";
+          source: "ss" | "netstat" | "lsof" | "none";
           ports: Array<{
             protocol: "tcp" | "udp";
             localAddress: string;
@@ -1882,7 +1882,7 @@ async function collectMetrics(host: SSHHostWithCredentials): Promise<{
         } catch (e) {}
 
         let firewall: {
-          type: "iptables" | "nftables" | "none";
+          type: "iptables" | "nftables" | "pf" | "none";
           status: "active" | "inactive" | "unknown";
           chains: Array<{
             name: string;
